@@ -20,40 +20,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: bcm2835
-            arch: arm
-            defconfig: bcm2835_defconfig
-            kernel: kernel
-
-          - name: arm64
-            arch: arm64
-            defconfig: defconfig
-            kernel: kernel8
-
-          - name: bcmrpi
-            arch: arm
-            defconfig: bcmrpi_defconfig
-            kernel: kernel
-
-          - name: bcm2709
-            arch: arm
-            defconfig: bcm2709_defconfig
-            kernel: kernel7
-
           - name: bcm2711
             arch: arm64
             defconfig: bcm2711_defconfig
             kernel: kernel8
-
-          - name: bcm2711_rt
-            arch: arm64
-            defconfig: bcm2711_rt_defconfig
-            kernel: kernel8_rt
-
-          - name: bcm2712
-            arch: arm64
-            defconfig: bcm2712_defconfig
-            kernel: kernel_2712
 
     steps:
     - name: Install armhf crossbuild toolchain
@@ -85,12 +55,17 @@ jobs:
         make O=${{github.workspace}}/build ${{matrix.defconfig}}
         scripts/config --file ${{github.workspace}}/build/.config --set-val CONFIG_WERROR y
         make O=${{github.workspace}}/build -j ${{env.NUM_JOBS}} $IMAGE modules dtbs
-        mkdir -p ${{github.workspace}}/install/boot/overlays
-        make O=${{github.workspace}}/build INSTALL_MOD_PATH=${{github.workspace}}/install modules_install
-        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/${DTS_SUBDIR}/*.dtb ${{github.workspace}}/install/boot/
-        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/overlays/*.dtb* ${{github.workspace}}/install/boot/overlays/
-        cp ${{github.workspace}}/arch/${ARCH}/boot/dts/overlays/README ${{github.workspace}}/install/boot/overlays/
-        cp ${{github.workspace}}/build/arch/${ARCH}/boot/$IMAGE ${{github.workspace}}/install/boot/${{matrix.kernel}}.img
+        mkdir -p ${{github.workspace}}/install/kernel/boot/overlays
+        mkdir -p ${{github.workspace}}/install/modules
+        mkdir -p ${{github.workspace}}/install/headers
+        make O=${{github.workspace}}/build INSTALL_MOD_PATH=${{github.workspace}}/install/modules modules_install
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/${DTS_SUBDIR}/*.dtb ${{github.workspace}}/install/kernel/boot/
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/overlays/*.dtb* ${{github.workspace}}/install/kernel/boot/overlays/
+        cp ${{github.workspace}}/arch/${ARCH}/boot/dts/overlays/README ${{github.workspace}}/install/kernel/boot/overlays/
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/$IMAGE ${{github.workspace}}/install/kernel/boot/${{matrix.kernel}}.img
+        wget -O ${{github.workspace}}/scripts/package/install-extmod-build https://github.com/torvalds/linux/raw/d8d326d64f6702caab01ea0cd48f6c0054f3d1b4/scripts/package/install-extmod-build
+        CC=gcc HOSTCC=gcc MAKE=make SRCARCH=arm64 srctree=${{github.workspace}} ${{github.workspace}}/scripts/package/install-extmod-build ${{github.workspace}}/install/headers
+        
 
     - name: Tar build
       run: tar -cvf ${{matrix.name}}_build.tar -C ${{github.workspace}}/install .
