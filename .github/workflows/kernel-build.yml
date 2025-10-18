@@ -1,0 +1,78 @@
+name: Pi kernel build tests
+
+on:
+  pull_request:
+    paths-ignore:
+      - '.github/**'
+    branches: [ "rpi-*" ]
+  push:
+    paths-ignore:
+      - '.github/**'
+    branches: [ "rpi-*" ]
+  workflow_dispatch:
+
+env:
+  NUM_JOBS: 6
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        include:
+          - name: bcm2711
+            arch: arm64
+            defconfig: bcm2711_defconfig
+            kernel: kernel8
+
+    steps:
+    - name: Install armhf crossbuild toolchain
+      if: matrix.arch == 'arm'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-arm-linux-gnueabihf
+      timeout-minutes: 15
+
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        clean: true
+
+    - name: Build kernel ${{matrix.name}}
+      run: |
+        mkdir ${{github.workspace}}/build
+        export ARCH=${{matrix.arch}}
+        if [[ "$ARCH" == "arm64" ]]; then
+          export DTS_SUBDIR=broadcom
+          export IMAGE=Image.gz
+        else
+          export CROSS_COMPILE=arm-linux-gnueabihf-
+          export DTS_SUBDIR=broadcom
+          export IMAGE=zImage
+        fi
+        make O=${{github.workspace}}/build ${{matrix.defconfig}}
+        scripts/config --file ${{github.workspace}}/build/.config --set-val CONFIG_WERROR y
+        make O=${{github.workspace}}/build -j ${{env.NUM_JOBS}} $IMAGE modules dtbs
+        mkdir -p ${{github.workspace}}/install/kernel/boot/overlays
+        mkdir -p ${{github.workspace}}/install/modules
+        mkdir -p ${{github.workspace}}/install/headers
+        make O=${{github.workspace}}/build INSTALL_MOD_PATH=${{github.workspace}}/install/modules modules_install
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/${DTS_SUBDIR}/*.dtb ${{github.workspace}}/install/kernel/boot/
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/overlays/*.dtb* ${{github.workspace}}/install/kernel/boot/overlays/
+        cp ${{github.workspace}}/arch/${ARCH}/boot/dts/overlays/README ${{github.workspace}}/install/kernel/boot/overlays/
+        cp ${{github.workspace}}/build/arch/${ARCH}/boot/$IMAGE ${{github.workspace}}/install/kernel/boot/${{matrix.kernel}}.img
+        wget -O ${{github.workspace}}/scripts/package/install-extmod-build https://github.com/torvalds/linux/raw/d8d326d64f6702caab01ea0cd48f6c0054f3d1b4/scripts/package/install-extmod-build
+        CC=gcc HOSTCC=gcc MAKE=make SRCARCH=arm64 srctree=${{github.workspace}} ${{github.workspace}}/scripts/package/install-extmod-build ${{github.workspace}}/install/headers
+        
+
+    - name: Tar build
+      run: tar -cvf ${{matrix.name}}_build.tar -C ${{github.workspace}}/install .
+
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{matrix.name}}_build
+        path: ${{matrix.name}}_build.tar
+        retention-days: 90
